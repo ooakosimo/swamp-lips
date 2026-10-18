@@ -19,10 +19,18 @@ body.touch #hint{display:none}
 .btn{touch-action:manipulation;cursor:pointer;border:2px solid rgba(0,0,0,.6);border-radius:12px;background:var(--paper);color:var(--ink);font:bold 12px Verdana,Geneva,sans-serif;box-shadow:0 3px 0 rgba(0,0,0,.35);padding:7px 11px;transition:background .5s}
 .btn:active{transform:translateY(2px);box-shadow:0 1px 0 rgba(0,0,0,.35)}
 .btn.on{background:var(--accent);outline:3px solid #fff}
-.dance{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:86px;min-height:44px;justify-content:center}
+.dance{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:78px;min-height:44px;justify-content:center}
 .dance b{font-size:17px;line-height:1}
 .dance span{font-size:11px}
 @media (max-width:640px){#dock{display:grid;grid-template-columns:repeat(4,1fr);width:96vw}.dance{min-width:0}#nameTag{font-size:18px}}
+#emotes{position:fixed;right:12px;bottom:max(12px,env(safe-area-inset-bottom));z-index:11;display:flex;flex-direction:column;align-items:flex-end}
+#emoPanel{display:none;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;padding:8px;border-radius:14px;background:rgba(10,14,12,.55)}
+#emoPanel.open{display:grid}
+.emo{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:74px;padding:6px 8px}
+.emo b{font-size:15px;line-height:1}
+.emo span{font-size:11px}
+#emoBtn{min-height:40px}
+@media (max-width:640px){#emotes{bottom:auto;top:54px;flex-direction:column-reverse}#emoPanel{margin:8px 0 0}}
 </style>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
@@ -31,9 +39,10 @@ body.touch #hint{display:none}
 <body>
 <canvas id="view" tabindex="0"></canvas>
 <div id="nameTag">Thelonious Muck</div>
-<div id="brand"><b>SWAMP LIPS</b><span>v0.1 - Thelonious dances</span><div id="hint"><span>1-6 dance - 0 rest - S sky - T turntable - drag to orbit, scroll to zoom</span></div></div>
+<div id="brand"><b>SWAMP LIPS</b><span>v0.1.1 - squish &amp; moves</span><div id="hint"><span>1-9 and - dance - 0 rest - Emotes menu (letters) - S sky - T turntable - drag to orbit, scroll to zoom</span></div></div>
 <div id="topbtns"><button class="btn" id="btnTurn">Turntable: on (T)</button><button class="btn" id="btnSky">Sky: Dusk (S)</button></div>
 <div id="dock"></div>
+<div id="emotes"><div id="emoPanel"></div><button class="btn" id="emoBtn">Emotes</button></div>
 
 <script type="module">
 import * as THREE from 'three';
@@ -52,6 +61,7 @@ const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
 const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const TAU = Math.PI * 2, PI = Math.PI;
 const lerp = (a, b, t) => a + (b - a) * t;
+function angDiff(a, b) { let d = (b - a) % TAU; if (d > PI) d -= TAU; if (d < -PI) d += TAU; return d; }
 function fhash(x, y, z) { const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453; return s - Math.floor(s); }
 
 // on twos: every pose in the scene (character, plants, water) is evaluated at 12 fps. Camera and sky stay smooth.
@@ -409,6 +419,8 @@ function updateStage() {   // on twos
 }
 
 // ================================================================ 6. THELONIOUS MUCK: character build (outfit anchors are here for v0.2)
+// jelly: a cheap vertex bulge around each shoulder plus a faint belly ripple, driven by the springs in section 10
+const jigU = { uJ: { value: [new THREE.Vector3(), new THREE.Vector3()] }, uSh: { value: [new THREE.Vector3(-0.47, 0.55, 0), new THREE.Vector3(0.47, 0.55, 0)] }, uRip: { value: new THREE.Vector2() } };
 const P_PIV = 0.45;   // body pivot height: squash and tilt happen around this point so the feet stay on the mud
 const look = { name: 'Thelonious Muck' };   // v0.2/v0.3: outfit + seed will pick this
 const rig = { root: new THREE.Group(), body: new THREE.Group(), model: new THREE.Group(), legs: [], stalks: [], lips: null, anchors: {}, mats: {} };
@@ -425,6 +437,13 @@ function buildThelonious() {
   }
   for (const sx of [-1, 1]) parts.push(paint(place(new THREE.SphereGeometry(0.1, 10, 8), sx * 0.44, 0.55, 0, 0, 0, 0), 0x5d7b30, 0.2));   // shoulder bumps hide the arm joins
   rig.mats.skin = std({ vertexColors: true, roughness: 0.9 });
+  rig.mats.skin.onBeforeCompile = (sh) => {
+    sh.uniforms.uJ = jigU.uJ; sh.uniforms.uSh = jigU.uSh; sh.uniforms.uRip = jigU.uRip;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uJ[2];uniform vec3 uSh[2];uniform vec2 uRip;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nfor(int i=0;i<2;i++){vec3 d=position-uSh[i];float w=exp(-dot(d,d)*14.0);transformed+=uJ[i]*w;}\ntransformed+=objectNormal*uRip.x*sin(position.y*16.0+position.x*7.0+uRip.y);');
+  };
+  rig.mats.skin.customProgramCacheKey = () => 'jig';
   const bodyMesh = new THREE.Mesh(mk(parts), rig.mats.skin); bodyMesh.castShadow = true; model.add(bodyMesh);
   rig.mats.leg = std({ color: 0x4a6228, roughness: 0.9 });
   for (const sx of [-1, 1]) {   // stubby feet (keep them)
@@ -440,21 +459,21 @@ function buildThelonious() {
     const eg = new THREE.Group(); eg.position.y = 0.3; sp.add(eg);
     ell(SPH, eyeWhite, 0.075, 0.075, 0.075, 0, 0, 0, eg).castShadow = true;
     const pu = ell(SPH_LO, pupil, 0.042, 0.042, 0.042, 0, 0, 0.06, eg);
-    rig.stalks.push({ g: sp, eg, pu, sx, a: 0, v: 0, blinkT: -1, blinkNext: R(1, 4) });
+    rig.stalks.push({ g: sp, eg, pu, sx, a: 0, v: 0, c: 0, cv: 0, blinkT: -1, blinkNext: R(1, 4) });
   }
   // the huge glossy double lips
   const lipMat = new THREE.MeshStandardMaterial({ color: 0xe0457b, roughness: 0.1, metalness: 0, emissive: 0x2a0412 });
   const inMat = std({ color: 0x24060f, roughness: 0.8 });
-  const lg = new THREE.Group(); lg.position.set(0, 0.5, 0.43); model.add(lg);
+  const lg = new THREE.Group(); lg.position.set(0, 0.5, 0.43); model.add(lg); const lobes = [], corners = [];
   const inner = ell(SPH, inMat, 0.25, 0.07, 0.07, 0, 0, 0.02, lg);
   const upper = new THREE.Group(); upper.position.set(0, 0.085, 0.07); lg.add(upper);
-  for (const sx of [-1, 1]) { const lo = ell(SPH, lipMat, 0.19, 0.095, 0.13, sx * 0.115, 0, 0, upper); lo.rotation.z = -sx * 0.14; lo.castShadow = true; }
+  for (const sx of [-1, 1]) { const lo = ell(SPH, lipMat, 0.19, 0.095, 0.13, sx * 0.115, 0, 0, upper); lo.rotation.z = -sx * 0.14; lo.castShadow = true; lobes.push(lo); }
   ell(SPH, lipMat, 0.09, 0.085, 0.12, 0, 0.012, 0.005, upper);
   const lower = ell(SPH, lipMat, 0.31, 0.12, 0.14, 0, -0.105, 0.07, lg); lower.castShadow = true;
-  for (const sx of [-1, 1]) ell(SPH_LO, inMat, 0.03, 0.03, 0.04, sx * 0.3, -0.01, 0.07, lg);
+  for (const sx of [-1, 1]) corners.push(ell(SPH_LO, inMat, 0.03, 0.03, 0.04, sx * 0.3, -0.01, 0.07, lg));
   const shineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
   ell(SPH_LO, shineMat, 0.07, 0.018, 0.03, -0.09, 0.115, 0.185, lg); ell(SPH_LO, shineMat, 0.08, 0.02, 0.03, -0.08, -0.07, 0.205, lg);
-  rig.lips = { g: lg, upper, lower, inner }; rig.mats.lip = lipMat;
+  rig.lips = { g: lg, upper, lower, inner, lobes, corners }; rig.mats.lip = lipMat;
   // empty anchors for outfits (v0.2)
   const ha = new THREE.Group(); ha.position.set(0, 1.0, 0); model.add(ha); rig.anchors.head = ha;
   const fa = new THREE.Group(); fa.position.set(0, 0.72, 0.4); model.add(fa); rig.anchors.face = fa;
@@ -482,7 +501,7 @@ const fistGeo = (() => {
 const _qa = new THREE.Quaternion(), _up = new THREE.Vector3(0, 1, 0);
 class Arm {
   constructor(side) {
-    this.side = side; this.s = 1; this.sv = 0; this.cool = 0; this.prevY = 1;
+    this.side = side; this.s = 1; this.sv = 0; this.cool = 0; this.prevY = 1; this.hPrev = new THREE.Vector3(); this.vPrev = new THREE.Vector3();
     this.p = []; this.o = []; this.guide = []; this.guideOld = []; this.sh0 = new THREE.Vector3(); this.sh1 = new THREE.Vector3();
     for (let i = 0; i <= NSEG; i++) { this.p.push(new THREE.Vector3(side * (0.5 + 0.2 * i), 0.4 - 0.07 * i, 0.05 * i)); this.o.push(this.p[i].clone()); this.guide.push(this.p[i].clone()); this.guideOld.push(this.p[i].clone()); }
     const vc = (SAMP + 1) * (RAD + 1);
@@ -595,12 +614,12 @@ function updateFx(h) {
 // ================================================================ 9. CHOREOGRAPHY (v0.1: six dances; each returns a pose for beat b)
 // A pose is plain numbers so two poses can be blended. Hand targets are in body space: x = outward from that shoulder, y = absolute height, z = forward.
 function newArm() { return { hx: 1.05, hy: 0.07, hz: 0.4, ex: 0.6, ey: 0.3, ez: 0.1, st: 1, smax: 1.55, pull: 1.1, grav: 1, wrap: 0, wy0: 0.2, wy1: 0.3, wrx: 0.4, wrz: 0.4, wth: 4.3, wdir: 1, wa: 0, wph: 0, wk: 0 }; }
-function basePose() { return { px: 0, pz: 0, py: 0, rx: 0, ry: 0, rz: 0, sq: 1, yawRate: 0, lip: 0, pk: 0, eye: 1, legL: 0, legR: 0, a: [newArm(), newArm()] }; }
+function basePose() { return { px: 0, pz: 0, py: 0, rx: 0, ry: 0, rz: 0, sq: 1, yawRate: 0, lip: 0, pk: 0, eye: 1, legL: 0, legR: 0, fw: 0, yawT: 0, smile: 0, smirk: 0, tongue: 0, droop: 0, stomp: 0, a: [newArm(), newArm()] }; }
 const easeIO = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 
 function idlePose(b) {   // Lurch-like: arms hang, knuckles drag on the mud
   const P = basePose(), sw = Math.sin(b * PI / 2);
-  P.sq = 1 + 0.022 * Math.sin(b * PI); P.rz = 0.05 * sw; P.ry = 0.14 * Math.sin(b * PI / 4); P.rx = 0.03 * Math.sin(b * PI);
+  P.sq = 1 + 0.035 * Math.sin(b * PI); P.rz = 0.05 * sw; P.ry = 0.14 * Math.sin(b * PI / 4); P.rx = 0.03 * Math.sin(b * PI);
   P.legL = 0.09 * sw; P.legR = -0.09 * sw;
   const ph = (b / 3.1) % 1; P.pk = ph < 0.3 ? Math.sin(PI * ph / 0.3) : 0;
   for (let i = 0; i < 2; i++) { const A = P.a[i]; A.hx = 1.05 + 0.07 * Math.sin(b * PI / 2 + i * 1.7); A.hz = 0.4 + 0.12 * Math.cos(b * PI / 2 + i * 1.7); A.ex = 0.75; A.ey = 0.28; A.ez = 0.2; }
@@ -705,10 +724,134 @@ function danceFloor(b, k) {   // breakdance floor spin, driven by the arms
   P.lip = e * (0.5 + 0.5 * Math.sin(k * 1.3)); P.sq = 1 - 0.04 * e * Math.sin(th);
   return P;
 }
+// ---- v0.1.1: travelling dances (stay on the pad) and emotes
+const envl = (t, len) => sstep(0, 0.5, t) * (1 - sstep(len - 0.6, len, t));   // ease in, hold, ease out over `len` beats
+function armTo(A, e, hx, hy, hz, ex, ey, ez) { A.hx = lerp(A.hx, hx, e); A.hy = lerp(A.hy, hy, e); A.hz = lerp(A.hz, hz, e); A.ex = lerp(A.ex, ex, e); A.ey = lerp(A.ey, ey, e); A.ez = lerp(A.ez, ez, e); }
+function heading(fn, t, flip) {   // face along the path (or backward along it)
+  const a = fn(t), c = fn(t + 0.05), dx = c[0] - a[0], dz = c[1] - a[1];
+  return { yawT: Math.atan2(dx, dz) + (flip ? PI : 0), fw: sstep(0.004, 0.03, Math.hypot(dx, dz)) };
+}
+const camYaw = (P) => Math.atan2(camera.position.x - P.px, camera.position.z - P.pz);
+
+const pathMoon = (t) => { const r = 1.5 * sstep(0, 1.5, t), f = t * 0.3; return [r * Math.sin(f), r * Math.cos(f)]; };
+function danceMoon(b) {   // slides backward around the pad, feet sliding, arms loose and trailing
+  const P = idlePose(b), pos = pathMoon(b), hd = heading(pathMoon, b, true), lp = Math.sin(b * PI);
+  P.px = pos[0]; P.pz = pos[1]; P.yawT = hd.yawT; P.fw = hd.fw;
+  P.legL = 0.55 * Math.max(0, lp); P.legR = 0.55 * Math.max(0, -lp);
+  P.rx = -0.12; P.rz = 0.04 * Math.sin(b * PI); P.py = 0.02; P.sq = 1 - 0.03 * Math.sin(b * TAU); P.smirk = 0.6; P.pk = 0.15;
+  for (let i = 0; i < 2; i++) { const A = P.a[i]; A.hx = 0.85; A.hy = 0.22 + 0.1 * Math.sin(b * PI + i * 2); A.hz = 0.95; A.ex = 0.8; A.ey = 0.3; A.ez = 0.5; A.pull = 0.55; }
+  return P;
+}
+const spotC = (n) => n <= 0 ? [0, 0] : [1.2 * Math.sin(n * 2.1), 1.2 * Math.cos(n * 2.1)];
+function danceChicken(b, k) {   // 4 beats beak pecks, 4 wing flaps, 4 butt wiggle, 4 claps + spin-hop to a new spot
+  const P = idlePose(b), t = b % 16, n = Math.floor(b / 16), sec = Math.floor(t / 4), u = t % 4;
+  const s0 = spotC(n), s1 = spotC(n + 1), tr = sec === 3 ? easeIO(u / 4) : 0;
+  P.px = lerp(s0[0], s1[0], tr); P.pz = lerp(s0[1], s1[1], tr);
+  P.fw = (sec === 3 && u > 0.8 && u < 3.2) ? 0 : 1; P.yawT = 0;
+  for (let i = 0; i < 2; i++) {
+    const A = P.a[i];
+    if (sec === 0) { const snap = (u * 2) % 1 < 0.5 ? 1 : 0; A.hx = 0.12 + 0.2 * snap; A.hy = 0.78; A.hz = 0.8; A.ex = 0.7; A.ey = 0.75; A.ez = 0.3; A.pull = 2.2; A.grav = 0.5; }
+    else if (sec === 1) { const fl = Math.sin(u * TAU * 2); A.hx = 1.05; A.hy = 0.85 + 0.4 * fl; A.hz = 0; A.ex = 0.9; A.ey = 0.95 + 0.35 * fl; A.ez = 0; A.pull = 2.2; A.grav = 0.4; }
+    else if (sec === 2) { A.hx = 0.65; A.hy = 0.55; A.hz = -0.1; A.ex = 0.95; A.ey = 0.7; A.ez = 0; A.pull = 1.8; }
+    else { const op = 0.5 + 0.5 * Math.sin(u * TAU * 2); A.hx = 0.1 + 0.8 * op; A.hy = 0.7; A.hz = 0.75; A.ex = 0.8; A.ey = 0.8; A.ez = 0.3; A.pull = 2.4; }
+  }
+  if (sec === 0) { const snap = (u * 2) % 1 < 0.5 ? 1 : 0; P.lip = snap * 0.9; P.rx = 0.22 * (1 - snap); P.pk = 0.5; P.py = 0.03 * snap; }
+  else if (sec === 1) { const fl = Math.sin(u * TAU * 2); P.py = 0.07 * Math.abs(fl); P.pk = 0.4; P.legL = 0.5 * Math.max(0, fl); P.legR = 0.5 * Math.max(0, -fl); }
+  else if (sec === 2) { const wg = Math.sin(b * TAU); P.ry = 0.45 * wg; P.rz = 0.12 * wg; P.sq = 1 - 0.07 * Math.abs(Math.sin(b * TAU * 2)); P.rx = 0.12; }
+  else { P.py = 0.3 * Math.sin(PI * u / 4); if (u >= 1 && u < 3) P.yawRate = TAU / (2 * BEAT); P.lip = 0.4; }
+  return P;
+}
+const sqPath = (t) => {
+  const tt = t % 16;
+  if (tt < 8) { const e = sstep(0, 0.8, tt) * (1 - sstep(7.2, 8, tt)), f = tt / 8 * TAU; return [1.3 * e * Math.sin(f), 1.3 * e * Math.cos(f)]; }
+  const t2 = tt - 8, e = sstep(0, 0.8, t2) * (1 - sstep(7.2, 8, t2)), f = t2 / 8 * TAU; return [1.6 * e * Math.sin(f), 1.6 * e * Math.cos(f)];
+};
+function danceSquare(b, k) {   // do-si-do (facing fixed, circling), then promenade with a yeehaw arm
+  const P = idlePose(b), t = b % 16, pos = sqPath(b), lp = Math.sin(b * PI);
+  P.px = pos[0]; P.pz = pos[1];
+  if (t < 8) { P.fw = 1; P.yawT = 0; } else { const hd = heading(sqPath, b, false); P.fw = hd.fw; P.yawT = hd.yawT; }
+  P.legL = 0.6 * Math.max(0, lp); P.legR = 0.6 * Math.max(0, -lp); P.py = 0.04 * Math.abs(lp); P.sq = 1 - 0.05 * Math.abs(lp); P.lip = 0.25; P.smile = 0.5;
+  for (let i = 0; i < 2; i++) {
+    const A = P.a[i];
+    if (t < 8) { A.hx = 0.8; A.hy = 0.4 + 0.15 * Math.abs(Math.sin(b * PI * 2)); A.hz = 0.7 * Math.sin(b * PI * 2 + i * PI); A.ex = 0.75; A.ey = 0.5; A.ez = A.hz * 0.4; A.pull = 2; }
+    else if (i === 1) { A.hx = 0.5 + 0.3 * Math.sin(b * TAU); A.hy = 1.5; A.hz = 0.1; A.ex = 0.6; A.ey = 1.0; A.ez = 0; A.pull = 1.8; A.grav = 0.3; }
+    else { A.hx = 0.6; A.hy = 0.55; A.hz = -0.1; A.ex = 0.95; A.ey = 0.7; A.ez = 0; A.pull = 1.8; }
+  }
+  return P;
+}
+const STEP_X = [0, 0.7, 1.4, 1.4, 1.4, 0.7, 0, -0.7, -1.4, -1.4, -1.4, -0.7, 0, 0, 0, 0];
+function danceStep(b, k) {   // side steps and stomps across the pad, arm claps
+  const P = idlePose(b), t = b % 16, i = Math.floor(t), f = t - i, prev = STEP_X[(i + 15) % 16], nx = STEP_X[i];
+  const moving = Math.abs(nx - prev) > 0.01, stompBeat = !moving && (i === 3 || i === 4 || i === 9 || i === 10);
+  P.px = lerp(prev, nx, easeIO(f * 2)); P.pz = 0.5 * Math.sin(t / 16 * TAU); P.fw = 1; P.yawT = 0;
+  P.py = moving ? 0.12 * Math.sin(PI * Math.min(1, f * 2)) : 0;
+  const lift = 0.6 * Math.sin(PI * f) * (stompBeat ? 1.4 : 1);
+  P.legL = i % 2 ? 0 : lift; P.legR = i % 2 ? lift : 0;
+  if (stompBeat) { P.stomp = f < 0.17 ? 1 : 0; P.sq = 1 - 0.1 * Math.exp(-f * 10); }
+  const together = f >= 0.5;
+  for (let j = 0; j < 2; j++) { const A = P.a[j]; A.hx = together ? 0.1 : 0.9; A.hy = stompBeat ? 1.1 : 0.75; A.hz = 0.7; A.ex = 0.8; A.ey = A.hy; A.ez = 0.3; A.pull = 2.4; A.grav = 0.5; }
+  P.lip = 0.2; P.smile = 0.4;
+  return P;
+}
+const pathRun = (t) => { const r = 1.5 * sstep(0, 1, t), f = t * 0.9; return [r * Math.sin(f), r * Math.cos(f)]; };
+function emoRun(b, k) {   // loops until the next input
+  const P = idlePose(b), pos = pathRun(b), hd = heading(pathRun, b, false), s = Math.sin(b * TAU);
+  P.px = pos[0]; P.pz = pos[1]; P.yawT = hd.yawT; P.fw = hd.fw;
+  P.legL = 0.9 * s; P.legR = -0.9 * s; P.rx = 0.28; P.py = 0.1 * Math.abs(s); P.lip = 0.3;
+  for (let i = 0; i < 2; i++) { const A = P.a[i]; A.hx = 0.7; A.hy = 0.5 + 0.2 * Math.cos(b * TAU + i * PI); A.hz = 0.8 * Math.sin(b * TAU + i * PI); A.ex = 0.8; A.ey = 0.5; A.ez = A.hz * 0.4; A.pull = 2.2; }
+  return P;
+}
+function emoLaugh(b, k) {
+  const P = idlePose(b), e = envl(b, 4), od = k % 2, s = od ? 1 : -1;
+  P.ry = 0.12 * e * s; P.rz = -0.1 * e * s; P.py = 0.04 * e * od; P.rx = -0.15 * e; P.sq = 1 - 0.05 * e * od;
+  P.lip = e * (0.75 + 0.25 * od); P.smile = e; P.eye = 1 - 0.7 * e;
+  for (let i = 0; i < 2; i++) { const A = P.a[i]; armTo(A, e, 0.55, 0.4, 0.5, 0.9, 0.4, 0.3); A.hy += 0.06 * s * e; A.pull = 1.8; }
+  return P;
+}
+function emoSmile(b) { const P = idlePose(b), e = envl(b, 4); P.smile = e; P.lip = 0.1 * e; P.eye = 1 - 0.35 * e; P.rz += 0.06 * e * Math.sin(b * PI); return P; }
+function emoSmirk(b) { const P = idlePose(b), e = envl(b, 4); P.smirk = e; P.smile = 0.15 * e; P.ry += 0.25 * e; P.rz += 0.12 * e; P.pk = 0.1 * e; return P; }
+function emoGrin(b) { const P = idlePose(b), e = envl(b, 4); P.smile = e; P.lip = 0.5 * e; P.eye = 1 - 0.6 * e; P.py = 0.03 * e * Math.abs(Math.sin(b * PI * 2)); return P; }
+function emoWave(b, k) {   // one long arm
+  const P = idlePose(b), e = envl(b, 6), A = P.a[1], w = b * TAU * 1.5;
+  armTo(A, e, 0.75, 1.55, 0.2, 0.8, 1.0, 0.2); A.hx += 0.3 * e * Math.sin(w); A.wa = 0.25 * e; A.wph = w; A.wk = 1.5; A.st = 1 + 0.3 * e; A.pull = 1.8; A.grav = 0.3;
+  P.smile = 0.7 * e; P.lip = 0.15 * e; P.rz -= 0.08 * e; P.fw = e; P.yawT = camYaw(P);
+  return P;
+}
+function emoPoint(b, k) {   // point at the camera
+  const P = idlePose(b), e = envl(b, 5), A = P.a[1];
+  armTo(A, e, 0.3, 0.9, 1.7 + 0.2 * Math.sin(b * TAU * 1.5), 0.6, 0.8, 0.9); A.pull = 2.2; A.grav = 0.4; A.smax = 1.6;
+  armTo(P.a[0], e, 0.65, 0.55, -0.1, 0.95, 0.7, 0);
+  P.smirk = 0.8 * e; P.fw = e; P.yawT = camYaw(P); P.rx += 0.06 * e;
+  return P;
+}
+function emoDead(b, k) {   // flops over, tongue-lip out, loops until the next input (then pops back up)
+  const P = idlePose(b), u = sstep(0, 0.8, b), ph = ((b - 1.5) / 3) % 1, tw = (b > 1.5 && ph < 0.12) ? Math.sin(PI * ph / 0.12) : 0;
+  P.rz = 1.5 * u; P.sq = 1 - 0.05 * u; P.eye = 1 - 0.88 * u; P.tongue = u; P.lip = 0.5 * u; P.droop = u; P.pk = 0;
+  P.legL = -0.4 * u + 0.5 * tw * u; P.legR = 0.5 * u; P.stomp = (b > 0.6 && b < 0.8) ? 1 : 0;
+  for (let i = 0; i < 2; i++) { const A = P.a[i]; armTo(A, u, 1.35, 0.07, i ? 0.6 : -0.5, 0.8, 0.2, 0); A.pull = 1.6; A.grav = 1.5; }
+  return P;
+}
+function emoPop(b) {   // up from play dead
+  const P = idlePose(b);
+  let hands = false;
+  if (b < 0.4) { P.sq = 0.6; }
+  else if (b < 1.4) { const u = (b - 0.4); P.py = 0.8 * Math.sin(PI * u); P.sq = 1.2; P.lip = 1; hands = true; }
+  else { const tau = b - 1.4; P.sq = 1 - 0.4 * Math.exp(-3 * tau) * Math.cos(TAU * 0.9 * tau); P.lip = tau < 0.4 ? 1 : 0; P.stomp = tau < 0.17 ? 1 : 0; }
+  if (hands) for (let i = 0; i < 2; i++) { const A = P.a[i]; A.hx = 0.6; A.hy = P.py + 1.4; A.hz = 0; A.ex = 0.6; A.ey = P.py + 0.9; A.ez = 0; A.pull = 1.2; A.grav = 0.4; }
+  return P;
+}
 const DANCES = [null,
-  { name: 'Windmill', fn: danceWindmill }, { name: 'Noodle wave', fn: danceNoodle }, { name: 'Self-hug', fn: danceHug },
-  { name: 'Ground drum', fn: danceDrum }, { name: 'The Jump', fn: danceJump }, { name: 'Floor spin', fn: danceFloor }
+  { name: 'Windmill', fn: danceWindmill, key: '1' }, { name: 'Noodle wave', fn: danceNoodle, key: '2' }, { name: 'Self-hug', fn: danceHug, key: '3' },
+  { name: 'Ground drum', fn: danceDrum, key: '4' }, { name: 'The Jump', fn: danceJump, key: '5' }, { name: 'Floor spin', fn: danceFloor, key: '6' },
+  { name: 'Moonwalk', fn: danceMoon, key: '7' }, { name: 'Chicken', fn: danceChicken, key: '8' }, { name: 'Square dance', fn: danceSquare, key: '9' }, { name: 'Step routine', fn: danceStep, key: '-' },
+  { name: 'Run', fn: emoRun, key: 'r', emote: 1 }, { name: 'Laugh', fn: emoLaugh, key: 'l', emote: 1, len: 4 }, { name: 'Smile', fn: emoSmile, key: 'm', emote: 1, len: 4 },
+  { name: 'Smirk', fn: emoSmirk, key: 'k', emote: 1, len: 4 }, { name: 'Grin', fn: emoGrin, key: 'g', emote: 1, len: 4 }, { name: 'Wave', fn: emoWave, key: 'w', emote: 1, len: 6 },
+  { name: 'Point', fn: emoPoint, key: 'p', emote: 1, len: 5 }, { name: 'Hug', fn: danceHug, key: 'h', emote: 1, len: 8 }, { name: 'Play dead', fn: emoDead, key: 'd', emote: 1 },
+  { name: 'Pop', fn: emoPop, len: 2.5, hidden: 1 }
 ];
+const KEYMAP = {}; DANCES.forEach((d, n) => { if (d && d.key) KEYMAP[d.key] = n; });
+const RUN = 11, DEAD = 19, POP = 20;
+
 function mixPose(a, b, w) {
   const o = {};
   for (const k in b) { const x = a[k], y = b[k]; o[k] = Array.isArray(y) ? y.map((yy, i) => mixPose(x[i], yy, w)) : (typeof y === 'object' ? mixPose(x, y, w) : x + (y - x) * w); }
@@ -716,6 +859,8 @@ function mixPose(a, b, w) {
 }
 let curDance = 0, danceT0 = 0, blend = 1, blendFrom = null, lastPose = null;
 function computePose() {
+  const D0 = DANCES[curDance];
+  if (D0 && D0.len && (poseT - danceT0) / BEAT > D0.len) setDance(0);   // one-shot emotes return to rest
   const D = curDance ? DANCES[curDance] : null, b = (poseT - (D ? danceT0 : 0)) / BEAT;
   let P = D ? D.fn(b, poseK) : idlePose(b);
   if (blend < 1 && blendFrom) { blend = Math.min(1, blend + POSE_DT / 0.4); P = mixPose(blendFrom, P, easeIO(blend)); }
@@ -723,35 +868,65 @@ function computePose() {
 }
 function setDance(n) {
   if (n === curDance) n = 0;
+  if (n === 0 && curDance === DEAD) n = POP;   // play dead pops back up
   blendFrom = lastPose; blend = lastPose ? 0 : 1; curDance = n; danceT0 = poseT;
-  document.querySelectorAll('.dance').forEach((el) => el.classList.toggle('on', +el.dataset.n === n));
+  document.querySelectorAll('.dance,.emo').forEach((el) => el.classList.toggle('on', +el.dataset.n === n));
 }
 
 // ================================================================ 10. RIG TICK: pose -> body, face, arms (runs 12 times a second)
-let yaw = 0, lastHeadY = 1, lastHeadV = 0, lastPy = 0;
+let yaw = 0, lastHeadY = 1, lastHeadV = 0, lastPy = 0, lastYawRate = 0, lastStomp = false;
+// jelly springs (squash, sideways wobble, lips, shoulder flab). Impulses arrive from landings, slaps, arm swings and turns; all run on twos.
+const jel = { x: { a: 0, v: 0 }, y: { a: 0, v: 0 }, z: { a: 0, v: 0 }, lip: { a: 0, v: 0 }, sh: [{ p: new THREE.Vector3(), v: new THREE.Vector3() }, { p: new THREE.Vector3(), v: new THREE.Vector3() }], idle: 3 };
+const JSPR = [[jel.y, 13, 0.16, 0.3], [jel.x, 11, 0.16, 0.22], [jel.z, 12, 0.16, 0.22], [jel.lip, 17, 0.14, 1.2]];
+function jellyStep(h) {
+  const dt = h / 6;
+  for (let i = 0; i < 6; i++) {
+    for (const q of JSPR) { const s = q[0]; s.v += (-q[1] * q[1] * s.a - 2 * q[2] * q[1] * s.v) * dt; s.a = clamp(s.a + s.v * dt, -q[3], q[3]); }
+    for (const sh of jel.sh) { sh.v.addScaledVector(sh.p, -256 * dt).multiplyScalar(1 - 4.8 * dt); sh.p.addScaledVector(sh.v, dt); sh.p.clampLength(0, 0.09); }
+  }
+  for (let i = 0; i < 2; i++) jigU.uJ.value[i].copy(jel.sh[i].p);
+  jigU.uRip.value.set(Math.min(0.05, (Math.abs(jel.x.a) + Math.abs(jel.y.a) + Math.abs(jel.z.a)) * 0.2), poseT * 14);
+}
+const _dv = new THREE.Vector3(), _dv2 = new THREE.Vector3();
 const _inv = new THREE.Matrix4(), _tw = new THREE.Vector3(), _tw2 = new THREE.Vector3(), _hp = new THREE.Vector3();
 const labelTarget = new THREE.Vector3(0, 1.7, 0);
 function rigApply(P, h) {
   const { root, body, model, lips } = rig;
   yaw += P.yawRate * h;
+  if (P.fw > 0.01) yaw += angDiff(yaw, P.yawT) * clamp(P.fw * 0.5, 0, 1);
   root.position.set(P.px, 0, P.pz); root.rotation.y = yaw;
-  const sq = clamp(P.sq, 0.3, 1.6), sxz = clamp(1 / Math.sqrt(sq), 0.8, 1.55);
-  body.position.y = P.py + P_PIV * sq; body.rotation.set(P.rx, P.ry, P.rz, 'YXZ'); body.scale.set(sxz, sq, sxz);
-  rig.legs[0].rotation.x = P.legL; rig.legs[1].rotation.x = P.legR;
-  // lips: pucker and open
-  const pk = P.pk, o = clamp(P.lip, 0, 1.2);
-  lips.g.scale.set(1 - 0.38 * pk, 1 + 0.15 * pk, 1 + 0.55 * pk); lips.g.position.z = 0.43 + 0.05 * pk;
-  lips.upper.position.y = 0.085 + 0.04 * o; lips.lower.position.y = -0.105 - 0.13 * o; lips.lower.rotation.x = 0.35 * o; lips.inner.scale.y = 0.07 + 0.11 * o;
-  root.updateMatrixWorld(true);
-  // landing: splat + kick the eyestalks
-  if (lastPy > 0.1 && P.py < 0.04) { splat(0, 0, 1, true); fxRing(0, 0, 0.5, 2.2, 0.8, 0.03, 0xe8f4ee, 0.5); fxRing(0, 0, PAD_R, PAD_R + 3.5, 1.2, -0.07, 0xffffff, 0.5); for (const s of rig.stalks) s.v += 7; }
+  const sq = clamp(P.sq, 0.3, 1.6);
+  // what the head just did (drives the jelly and the eyestalks)
+  const headY = P.py + sq, hv = (headY - lastHeadY) / h, dHv = clamp(hv - lastHeadV, -12, 12), acc = dHv / h; lastHeadY = headY; lastHeadV = hv;
+  const dYr = clamp(P.yawRate - lastYawRate, -10, 10); lastYawRate = P.yawRate;
+  if (lastPy > 0.1 && P.py < 0.04) { splat(P.px, P.pz, 1, true); fxRing(P.px, P.pz, 0.5, 2.2, 0.8, 0.03, 0xe8f4ee, 0.5); fxRing(0, 0, PAD_R, PAD_R + 3.5, 1.2, -0.07, 0xffffff, 0.5); for (const s of rig.stalks) s.v += 7; jel.y.v -= 3.5; jel.x.v += 2; jel.z.v -= 2; jel.lip.v += 4; }   // landing
   lastPy = P.py;
-  // eyestalk springs: they lag the body's vertical motion and get kicked by slaps
-  const headY = P.py + sq, hv = (headY - lastHeadY) / h, acc = (hv - lastHeadV) / h; lastHeadY = headY; lastHeadV = hv;
+  const stomping = P.stomp > 0.5;
+  if (stomping && !lastStomp) { splat(P.px, P.pz, 0.6, false); jel.y.v -= 2.5; jel.x.v += 1.2; jel.lip.v += 2.5; for (const s of rig.stalks) s.v += 4; }
+  lastStomp = stomping;
+  if (!curDance) { jel.idle -= h; if (jel.idle <= 0) { jel.idle = R(2, 4.5); jel.y.v += R(-1, 1) * 1.2; jel.x.v += R(-1, 1) * 0.9; jel.z.v += R(-1, 1) * 0.9; jel.lip.v += R(-1, 1) * 1.5; } }   // tiny jiggle so he is alive at rest
+  jel.y.v -= dHv * 0.25; jel.lip.v -= dHv * 0.35; jel.x.v += dYr * 0.04; jel.z.v -= dYr * 0.03;
+  jellyStep(h);
+  // body: volume-preserving squash and stretch plus lag wobble
+  const jx = jel.x.a, jy = jel.y.a, jz = jel.z.a, sxz0 = clamp(1 / Math.sqrt(sq), 0.8, 1.55), sy = sq * (1 + jy), cv = 1 / Math.cbrt((1 + jx) * (1 + jy) * (1 + jz));
+  body.position.y = P.py + P_PIV * sy * cv; body.rotation.set(P.rx - jz * 0.6, P.ry, P.rz + jx * 0.6, 'YXZ'); body.scale.set(sxz0 * (1 + jx) * cv, sy * cv, sxz0 * (1 + jz) * cv);
+  rig.legs[0].rotation.x = P.legL; rig.legs[1].rotation.x = P.legR;
+  // lips: pucker, open, jiggle late, smile / smirk / tongue
+  const pk = P.pk, sm = P.smile, sk = P.smirk, tg = P.tongue, lj = jel.lip.a, o = clamp(P.lip + Math.min(0.5, Math.abs(lj) * 1.2), 0, 1.3);
+  lips.g.scale.set((1 - 0.38 * pk) * (1 + 0.14 * sm), (1 + 0.15 * pk) * (1 + lj * 0.25), 1 + 0.55 * pk); lips.g.position.set(0, 0.5 + lj * 0.05, 0.43 + 0.05 * pk);
+  lips.upper.position.y = 0.085 + 0.04 * o - lj * 0.02;
+  lips.lower.position.set(0, -0.105 - 0.13 * o - lj * 0.05 - 0.05 * tg, 0.07 + 0.14 * tg); lips.lower.rotation.set(0.35 * o + 0.5 * tg, 0, 0.14 * sk);
+  lips.inner.scale.y = 0.07 + 0.11 * o;
+  for (let k = 0; k < 2; k++) { const sx = k ? 1 : -1, up = sx > 0 ? Math.max(0, sk) : Math.max(0, -sk); lips.lobes[k].rotation.z = -sx * (0.14 + 0.35 * sm + 0.45 * up); lips.corners[k].position.set(sx * (0.3 + 0.03 * sm), -0.01 + 0.07 * sm + 0.1 * up, 0.07); }
+  root.updateMatrixWorld(true);
+  // eyestalk springs: they lag the body, overshoot, and get kicked by slaps
   for (let k = 0; k < 2; k++) {
-    const s = rig.stalks[k], w = 15 + k * 2.5, z = 0.2, dt = h / 6;
-    for (let i = 0; i < 6; i++) { s.v += (-w * w * s.a - 2 * z * w * s.v - 1.0 * acc * (k ? 0.9 : 1.1)) * dt; s.a = clamp(s.a + s.v * dt, -1, 1); }
-    s.g.rotation.z = -s.sx * 0.35 + 0.1 * Math.sin(poseT * 1.7 + k * 2); s.g.rotation.x = 0.25 + 0.08 * Math.sin(poseT * 1.3 + k) + s.a;
+    const s = rig.stalks[k], w = 15 + k * 2.5, z = 0.12, dt = h / 6;
+    for (let i = 0; i < 6; i++) {
+      s.v += (-w * w * s.a - 2 * z * w * s.v - acc * (k ? 0.9 : 1.1)) * dt; s.a = clamp(s.a + s.v * dt, -1, 1);
+      s.cv += (-w * w * (s.c + jx * 3) - 2 * z * w * s.cv) * dt; s.c = clamp(s.c + s.cv * dt, -0.6, 0.6);
+    }
+    s.g.rotation.z = -s.sx * 0.35 + 0.1 * Math.sin(poseT * 1.7 + k * 2) + s.c - s.sx * 0.5 * P.droop; s.g.rotation.x = 0.25 + 0.08 * Math.sin(poseT * 1.3 + k) + s.a + P.droop;
     if (s.blinkT < 0) { s.blinkNext -= h; if (s.blinkNext <= 0) s.blinkT = 0; } else { s.blinkT += h; if (s.blinkT > 0.2) { s.blinkT = -1; s.blinkNext = R(2, 6); } }
     s.eg.scale.y = Math.min(P.eye, s.blinkT < 0 ? 1 : 1 - 0.9 * Math.sin(PI * s.blinkT / 0.2));
   }
@@ -786,8 +961,15 @@ function rigApply(P, h) {
     arm.build();
     // slap detection: fist came down fast onto the mud
     const hy = arm.p[NSEG].y; arm.cool -= h;
-    if (arm.cool <= 0 && arm.prevY - hy > 0.22 && hy < 0.18) { const f = clamp((arm.prevY - hy) / 0.9, 0.2, 1); splat(arm.p[NSEG].x, arm.p[NSEG].z, f, false); arm.cool = 0.2; for (const s of rig.stalks) s.v += 5 * f * (rnd() < 0.5 ? 1 : -1.3); }
+    if (arm.cool <= 0 && arm.prevY - hy > 0.22 && hy < 0.18) { const f = clamp((arm.prevY - hy) / 0.9, 0.2, 1); splat(arm.p[NSEG].x, arm.p[NSEG].z, f, false); arm.cool = 0.2; for (const s of rig.stalks) s.v += 5 * f * (rnd() < 0.5 ? 1 : -1.3); jel.y.v -= 2.2 * f; jel.x.v += R(-1, 1) * 1.3 * f; jel.lip.v += 3 * f; }
     arm.prevY = hy;
+    // arm swing makes the flab wobble: hand acceleration kicks the body and this shoulder's patch
+    const hpn = arm.p[NSEG];
+    _dv.set((hpn.x - arm.hPrev.x) / h, (hpn.y - arm.hPrev.y) / h, (hpn.z - arm.hPrev.z) / h); arm.hPrev.copy(hpn);
+    _dv2.subVectors(_dv, arm.vPrev).clampScalar(-8, 8); arm.vPrev.copy(_dv);
+    const lx = _dv2.x * yc - _dv2.z * ys, lz = _dv2.x * ys + _dv2.z * yc;
+    jel.x.v -= lx * 0.12; jel.z.v -= lz * 0.12; jel.y.v -= _dv2.y * 0.08; jel.lip.v += _dv2.y * 0.05;
+    jel.sh[i].v.x -= lx * 0.2; jel.sh[i].v.y -= _dv2.y * 0.2; jel.sh[i].v.z -= lz * 0.2;
   }
   labelTarget.set(P.px, 1.72 + Math.max(0, P.py) * 0.95, P.pz);
 }
@@ -800,7 +982,10 @@ function tick() {
 
 // ================================================================ 11. UI + INPUT
 const dock = $('dock');
-DANCES.forEach((d, n) => { if (!d) return; const b = document.createElement('button'); b.className = 'btn dance'; b.dataset.n = n; b.innerHTML = '<b>' + n + '</b><span>' + d.name + '</span>'; b.addEventListener('click', () => setDance(n)); dock.appendChild(b); });
+DANCES.forEach((d, n) => { if (!d || d.hidden || d.emote) return; const b = document.createElement('button'); b.className = 'btn dance'; b.dataset.n = n; b.innerHTML = '<b>' + d.key + '</b><span>' + d.name + '</span>'; b.addEventListener('click', () => setDance(n)); dock.appendChild(b); });
+const emoPanel = $('emoPanel');
+DANCES.forEach((d, n) => { if (!d || !d.emote) return; const b = document.createElement('button'); b.className = 'btn emo'; b.dataset.n = n; b.innerHTML = '<b>' + d.key.toUpperCase() + '</b><span>' + d.name + '</span>'; b.addEventListener('click', () => setDance(n)); emoPanel.appendChild(b); });
+$('emoBtn').addEventListener('click', () => emoPanel.classList.toggle('open'));
 { const b = document.createElement('button'); b.className = 'btn dance'; b.innerHTML = '<b>0</b><span>Rest</span>'; b.addEventListener('click', () => setDance(0)); dock.appendChild(b); }
 const btnSky = $('btnSky'), btnTurn = $('btnTurn'), tag = $('nameTag');
 function setName(s) { look.name = s; tag.textContent = s; }
@@ -817,11 +1002,13 @@ btnSky.addEventListener('click', () => setMode(modeIdx + 1));
 btnTurn.addEventListener('click', () => setTurn(!turn.on));
 window.addEventListener('keydown', (e) => {
   if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-  const k = e.key.toLowerCase();
-  if (k >= '1' && k <= '6') setDance(+k); else if (k === '0' || k === ' ' || k === 'escape') { setDance(0); e.preventDefault(); }
-  else if (k === 's') setMode(modeIdx + 1); else if (k === 't') setTurn(!turn.on);
+  const k = e.key.toLowerCase(), id = KEYMAP[k];
+  if (id) setDance(id);
+  else if (k === '0' || k === ' ' || k === 'escape') { setDance(0); e.preventDefault(); }
+  else { if (k === 's') setMode(modeIdx + 1); else if (k === 't') setTurn(!turn.on); if (curDance === RUN || curDance === DEAD) setDance(0); }   // any other input ends run / play dead
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('pointerdown', () => { if (curDance === RUN || curDance === DEAD) setDance(0); });
 
 const _lp = new THREE.Vector3(), labelPos = new THREE.Vector3(0, 1.7, 0);
 function updateLabel(dt) {
@@ -871,7 +1058,8 @@ function frame() {
   const sky = q.get('sky'); if (sky !== null) { const i = isNaN(+sky) ? MODES.findIndex(m => m.name.toLowerCase() === sky.toLowerCase()) : +sky; if (i >= 0) setMode(i, true); }
   if (q.get('turn') === '0') setTurn(false); else setTurn(true);
   for (let i = 0; i < 70; i++) tick();   // let the arms settle onto the mud before the first frame
-  const d = +q.get('dance'); if (d >= 1 && d <= 6) setDance(d);
+  const d = +q.get('dance'); if (d >= 1 && DANCES[d] && !DANCES[d].hidden) setDance(d);
+  if (q.get('emotes') === '1') emoPanel.classList.add('open');
   setName(look.name);
   if (q.get('cam')) { const c = q.get('cam').split(',').map(Number); if (c.length === 3) camera.position.set(c[0], c[1], c[2]); }
   labelPos.copy(labelTarget);
